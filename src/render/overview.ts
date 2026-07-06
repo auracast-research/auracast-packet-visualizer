@@ -1,4 +1,5 @@
 import { $, cssVar, el } from '../dom';
+import { sduLabel } from '../model/colors';
 import { extractEnhancedPackets } from '../pcapng/blocks';
 import { buildCaptureFromPackets, computeEventRecoveryStats, estimateEventIndexForTimeUs } from '../pcapng/capture';
 import { appVars, state } from '../state';
@@ -183,9 +184,17 @@ export function renderMinimapCapture(): void {
       },
       svg,
     );
+    // Name the actual missing SDUs (not just a count) so the red/orange status is legible at a
+    // glance instead of requiring a trip into the log to find which payloads it refers to.
+    const MAX_NAMED = 8;
+    const missingNames = stats.missingSdus.map((m) => sduLabel(m.sdu, m.row, capture.config.numBis));
+    const missingList =
+      missingNames.length > MAX_NAMED
+        ? `${missingNames.slice(0, MAX_NAMED).join(', ')}, +${missingNames.length - MAX_NAMED} more`
+        : missingNames.join(', ');
     const statusLabel =
       stats.status === 'lost'
-        ? `${stats.lostPayloads} of ${stats.totalPayloads} payload(s) unrecoverable — every scheduled copy missing`
+        ? `${stats.lostPayloads} of ${stats.totalPayloads} payload(s) unrecoverable - every scheduled copy missing: ${missingList}`
         : stats.status === 'degraded'
           ? `All payloads recoverable, but ${stats.totalPayloads - stats.fullPayloads} of ${stats.totalPayloads} missing some copies`
           : `All ${stats.totalPayloads} payload(s) fully received`;

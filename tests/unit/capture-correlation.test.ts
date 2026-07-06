@@ -134,4 +134,13 @@ describe('buildSubeventsFromCapture', () => {
       expect(typeof item.pduBytes).toBe('number');
     }
   });
+
+  it('always populates expectedSdu - the real payloadNum when observed, a formula prediction otherwise', () => {
+    const capture = loadCapture('auracast.pcapng');
+    const model = buildSubeventsFromCapture(capture, 280, 3);
+    for (const item of model.list) {
+      expect(typeof item.expectedSdu).toBe('number');
+      if (item.observed) expect(item.expectedSdu).toBe(item.sdu);
+    }
+  });
 });

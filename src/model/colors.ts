@@ -20,6 +20,14 @@ export function roleLabel(item: { kind: PacketKind; g: number; pretxK: number | 
   return 'PRE' + (item.pretxK! + 1);
 }
 
+// A bare "SDU #109812" is ambiguous once there's more than one BIS: each BIS has its own
+// payload-number sequence (per the BIG spec, they all start at 0 and advance in lockstep), so
+// the exact same number legitimately shows up on two different BIS for two unrelated payloads.
+// Qualifying with the BIS whenever there's more than one avoids reading those as the same thread.
+export function sduLabel(sdu: number, row: number, numBis: number): string {
+  return numBis > 1 ? `BIS ${row + 1} · SDU #${sdu}` : `SDU #${sdu}`;
+}
+
 export function roleDesc(item: {
   kind: PacketKind;
   b: number;

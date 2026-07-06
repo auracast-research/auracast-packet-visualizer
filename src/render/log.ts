@@ -1,10 +1,33 @@
 import { $, cssVar } from '../dom';
-import { badgeTextColor, colorFor, pretxColor, roleDesc, roleLabel } from '../model/colors';
+import { badgeTextColor, colorFor, pretxColor, roleDesc, roleLabel, sduLabel } from '../model/colors';
 import { allCopiesOf } from '../model/subevents';
 import { controlOffsetUs, subeventTimeUs } from '../model/timing';
+import { computeEventRecoveryStats } from '../pcapng/capture';
 import { appVars, state } from '../state';
 import type { CaptureSubeventItem, Model, SubeventItem } from '../types';
 import { jumpToEventWindow, windowEvents } from './overview';
+
+// A per-event summary tacked onto the log's sticky "Event N" header, so the reason for a
+// missing/red sub-event further down is visible without having to scroll past it first or hop
+// over to the whole-capture overview. Capture mode only - computeEventRecoveryStats reads real
+// byKey data that simulated mode doesn't have.
+const MAX_NAMED_MISSING = 6;
+function eventHeaderStatusHtml(event: number): string {
+  const capture = appVars.capture;
+  if (state.mode !== 'capture' || !capture) return '';
+  const stats = computeEventRecoveryStats(capture, event);
+  if (stats.status === 'full') return '';
+  if (stats.status === 'degraded') {
+    const degraded = stats.totalPayloads - stats.fullPayloads;
+    return ` <span class="event-status degraded">${degraded} of ${stats.totalPayloads} payload(s) missing some copies, still recoverable</span>`;
+  }
+  const names = stats.missingSdus.map((m) => sduLabel(m.sdu, m.row, state.numBis));
+  const shown =
+    names.length > MAX_NAMED_MISSING
+      ? `${names.slice(0, MAX_NAMED_MISSING).join(', ')}, +${names.length - MAX_NAMED_MISSING} more`
+      : names.join(', ');
+  return ` <span class="event-status lost">${stats.lostPayloads} of ${stats.totalPayloads} payload(s) unrecoverable - missing ${shown}</span>`;
+}
 
 function threadHtml(sdu: number, row: number, nse: number, altClass: string): string {
   const { originEvent, copies } = allCopiesOf(sdu, state);
@@ -36,7 +59,7 @@ function threadHtml(sdu: number, row: number, nse: number, altClass: string): st
       ? `<div class="recovery-msg ok">Recoverable &mdash; ${survivors} of ${copies.length} copies still available.</div>`
       : `<div class="recovery-msg bad">Not recoverable &mdash; all ${copies.length} copies marked lost.</div>`;
   return `<div class="thread${altClass || ''}">
-      <p class="thread-lead">SDU #${sdu} originates in Event ${originEvent} and is sent <b>${copies.length}</b> time(s) total (IRC=${state.irc} + ${state.npt} pre-tx group(s)):</p>
+      <p class="thread-lead">${sduLabel(sdu, row, state.numBis)} originates in Event ${originEvent} and is sent <b>${copies.length}</b> time(s) total (IRC=${state.irc} + ${state.npt} pre-tx group(s)):</p>
       ${rowsHtml}
       ${lostCount > 0 ? msg : ''}
     </div>`;
@@ -72,8 +95,9 @@ function threadHtmlCapture(sdu: number, row: number, altClass: string): string {
     copies.length < expectedTotal
       ? `<div class="recovery-msg bad">Only ${copies.length} of ${expectedTotal} expected cop${expectedTotal > 1 ? 'ies' : 'y'} observed &mdash; ${expectedTotal - copies.length} really w${expectedTotal - copies.length > 1 ? 'ere' : 'as'} not captured.</div>`
       : `<div class="recovery-msg ok">All ${expectedTotal} expected copies observed.</div>`;
+  const label = sduLabel(sdu, row, capture.config.numBis);
   return `<div class="thread${altClass || ''}">
-      <p class="thread-lead">${originEvent !== undefined ? `SDU #${sdu} originates in Event ${originEvent}` : `SDU #${sdu}'s original transmission was never captured`} &mdash; ${copies.length} real cop${copies.length === 1 ? 'y' : 'ies'} captured:</p>
+      <p class="thread-lead">${originEvent !== undefined ? `${label} originates in Event ${originEvent}` : `${label}'s original transmission was never captured`} &mdash; ${copies.length} real cop${copies.length === 1 ? 'y' : 'ies'} captured:</p>
       ${rowsHtml}
       ${missingNote}
     </div>`;
@@ -87,6 +111,7 @@ interface LogRow {
   isControl?: boolean;
   observed?: boolean;
   sdu?: number | null;
+  expectedSdu?: number;
   chan?: number | null;
   pduBytes?: number | null;
   kind?: SubeventItem['kind'];
@@ -134,7 +159,7 @@ export function renderLog(model: Model): void {
     if (item.event !== currentEvent) {
       currentEvent = item.event;
       eventParity = 1 - eventParity;
-      html += `<div class="event-divider">Event ${currentEvent}</div>`;
+      html += `<div class="event-divider">Event ${currentEvent}${eventHeaderStatusHtml(currentEvent)}</div>`;
     }
     const altClass = eventParity ? ' ev-alt' : '';
     const capture = appVars.capture;
@@ -180,7 +205,7 @@ export function renderLog(model: Model): void {
           <span class="roletag" style="background:${colorFor(colorItem)}; color:${badgeTextColor(colorFor(colorItem))}">${roleLabel(roleItem)}</span>
           ${state.numBis > 1 ? `<span class="bistag">BIS ${item.row + 1}</span>` : ''}
           <span class="msg-main">
-            <span class="msg-title">Not observed</span>
+            <span class="msg-title">Not observed &mdash; expected ${sduLabel(item.expectedSdu!, item.row, state.numBis)}</span>
             <span class="msg-desc">Expected ${roleDesc(descItem).charAt(0).toLowerCase() + roleDesc(descItem).slice(1)}, but never appears in the capture</span>
           </span>
           <span class="msg-time mono">${timeLabel}</span>
@@ -196,7 +221,7 @@ export function renderLog(model: Model): void {
         ${chanTag}
         ${pduTag}
         <span class="msg-main">
-          <span class="msg-title">SDU #${item.sdu}</span>
+          <span class="msg-title">${sduLabel(item.sdu!, item.row, state.numBis)}</span>
           <span class="msg-desc">${roleDesc(descItem)}</span>
         </span>
         <span class="msg-time mono">${timeLabel}</span>

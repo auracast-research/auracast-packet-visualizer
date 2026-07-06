@@ -171,6 +171,10 @@ export interface Capture {
   originEvent: Map<string, number>;
   eventBaseUs: Map<number, number>;
   originUs: number;
+  // payloadNum = originEvent * bn + b + sduOriginOffset, derived by voting across real 'new'
+  // rows (see buildCaptureFromPackets) - lets us show an expected SDU number for a sub-event
+  // that was never captured, the same way pto is derived rather than assumed.
+  sduOriginOffset: number;
   allEventsRange: number[];
   totalPackets: number;
   rawUncommentedCount: number;
@@ -205,6 +209,10 @@ export interface CaptureSubeventItem {
   pretxK: number | null;
   targetEvent: number | undefined;
   sdu: number | null;
+  // The SDU number this slot should carry whether or not it was actually observed - real
+  // payloadNum when `observed`, otherwise a same-formula prediction (see sduOriginOffset).
+  // Always populated so "not observed" rows can still say *which* SDU is missing.
+  expectedSdu: number;
   chan: number | null;
   timeUs: number | null;
   observed: boolean;

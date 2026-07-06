@@ -75,4 +75,30 @@ describe('computeEventRecoveryStats', () => {
     }
     expect(found, 'expected to find at least one real pre-transmission-only recovery case in this fixture').toBe(true);
   });
+
+  it('missingSdus has exactly one formula-predicted entry per lostPayload, in-range for the BIS config', () => {
+    const capture = loadCapture('auracast.pcapng');
+    for (const E of capture.allEventsRange.slice(0, 50)) {
+      const stats = computeEventRecoveryStats(capture, E);
+      expect(stats.missingSdus.length).toBe(stats.lostPayloads);
+      for (const m of stats.missingSdus) {
+        expect(m.sdu).toBe(E * capture.config.bn + m.b + capture.sduOriginOffset);
+        expect(m.row).toBeGreaterThanOrEqual(0);
+        expect(m.row).toBeLessThan(capture.config.numBis);
+        expect(m.b).toBeGreaterThanOrEqual(0);
+        expect(m.b).toBeLessThan(capture.config.bn);
+      }
+    }
+  });
+
+  it("sduOriginOffset predicts real 'new' payloadNum values for the large majority of observed rows", () => {
+    // payloadNum = event*bn + b + sduOriginOffset should hold for every BIS (per the BIG spec,
+    // every BIS's payload counter starts at 0 together and advances by bn each event) - checked
+    // here against real 'new' rows rather than assumed, the same way pto's derivation is checked.
+    const capture = loadCapture('auracast.pcapng');
+    const newRows = capture.rows.filter((r) => r.kindSimple === 'new');
+    expect(newRows.length).toBeGreaterThan(0);
+    const matching = newRows.filter((r) => r.payloadNum === r.event * capture.config.bn + r.se + capture.sduOriginOffset);
+    expect(matching.length / newRows.length).toBeGreaterThan(0.9);
+  });
 });

@@ -155,6 +155,20 @@ export function buildCaptureFromPackets(packets: RawPacket[]): Capture {
     ptoEntries.length <= 1 ||
     ptoEntries[0]![1] >= 0.95 * rows.filter((r) => r.kindSimple === 'pretx').length;
 
+  // Per the BIG spec every BIS's payload counter starts at 0 when the BIG is created and
+  // advances by `bn` every event, so payloadNum = event*bn + b should hold exactly - but rather
+  // than assume that zero offset, derive it by voting across real 'new' rows (same approach as
+  // pto above), so a capture that doesn't start at the BIG's own event 0 still predicts
+  // correctly. For a 'new' row g=0, so se===b directly.
+  const sduOffsetVotes: Record<number, number> = {};
+  for (const r of rows) {
+    if (r.kindSimple !== 'new') continue;
+    const offset = r.payloadNum - r.event * big.bn - r.se;
+    sduOffsetVotes[offset] = (sduOffsetVotes[offset] || 0) + 1;
+  }
+  const sduOffsetEntries = Object.entries(sduOffsetVotes).sort((a, b) => b[1] - a[1]);
+  const sduOriginOffset = sduOffsetEntries.length ? Number(sduOffsetEntries[0]![0]) : 0;
+
   const byKey = new Map<string, PacketRow>(); // "event:row:se" -> row
   const copiesByPayload = new Map<string, PacketRow[]>(); // "row:payloadNum" -> [rows] sorted by time, with rank
   for (const r of rows) {
@@ -219,6 +233,7 @@ export function buildCaptureFromPackets(packets: RawPacket[]): Capture {
     originEvent,
     eventBaseUs,
     originUs,
+    sduOriginOffset,
     bigInfoRows,
     // The full contiguous event-number span, including numbers with zero captured packets (an
     // entirely missed event) — used for navigation/overview so a total gap is shown as "not
@@ -234,12 +249,19 @@ export function buildCaptureFromPackets(packets: RawPacket[]): Capture {
   };
 }
 
+export interface MissingSdu {
+  row: number; // 0-based BIS index
+  b: number; // burst index within the event
+  sdu: number; // predicted payloadNum (see sduOriginOffset) - never directly observed
+}
+
 export interface EventRecoveryStats {
   totalPayloads: number;
   lostPayloads: number; // zero copies (new/retx/pretx) observed anywhere
   partialPayloads: number; // at least one copy observed, but not every scheduled copy
   fullPayloads: number; // every scheduled copy (irc + npt) observed
   status: 'lost' | 'degraded' | 'full';
+  missingSdus: MissingSdu[]; // which SDUs make up lostPayloads, for surfacing *what's* missing
 }
 
 // Whether event E's own data actually made it across, accounting for retransmissions AND
@@ -255,6 +277,7 @@ export function computeEventRecoveryStats(capture: Capture, event: number): Even
   let lostPayloads = 0;
   let partialPayloads = 0;
   let fullPayloads = 0;
+  const missingSdus: MissingSdu[] = [];
   for (let row = 0; row < cfg.numBis; row++) {
     for (let b = 0; b < cfg.bn; b++) {
       let copiesObserved = 0;
@@ -265,15 +288,17 @@ export function computeEventRecoveryStats(capture: Capture, event: number): Even
         const srcEvent = event - cfg.pto * (k + 1);
         if (capture.byKey.has(`${srcEvent}:${row}:${(cfg.irc + k) * cfg.bn + b}`)) copiesObserved++;
       }
-      if (copiesObserved === 0) lostPayloads++;
-      else if (copiesObserved >= copiesExpected) fullPayloads++;
+      if (copiesObserved === 0) {
+        lostPayloads++;
+        missingSdus.push({ row, b, sdu: event * cfg.bn + b + capture.sduOriginOffset });
+      } else if (copiesObserved >= copiesExpected) fullPayloads++;
       else partialPayloads++;
     }
   }
   const totalPayloads = cfg.numBis * cfg.bn;
   const status: EventRecoveryStats['status'] =
     lostPayloads > 0 ? 'lost' : fullPayloads < totalPayloads ? 'degraded' : 'full';
-  return { totalPayloads, lostPayloads, partialPayloads, fullPayloads, status };
+  return { totalPayloads, lostPayloads, partialPayloads, fullPayloads, status, missingSdus };
 }
 
 // Periodic advertising (which carries BIGInfo) runs on its own cadence, entirely independent of
@@ -409,6 +434,7 @@ export function buildSubeventsFromCapture(
             pretxK,
             targetEvent,
             sdu: real.payloadNum,
+            expectedSdu: real.payloadNum,
             chan: real.chan,
             timeUs: real.tsUs - capture.originUs,
             observed: true,
@@ -433,6 +459,9 @@ export function buildSubeventsFromCapture(
           // pinning every missing sub-event of the same event to the same instant, which would
           // stack them all on top of each other in any timeline view.
           const estTimeUs = eventBaseUs === null ? null : eventBaseUs + s * cfg.subIntervalUs;
+          // The payload originates in E itself (new/retx) or in the future event this slot
+          // pre-transmits for - same rule the observed branch above uses for `targetEvent`.
+          const originEventForSdu = kind === 'pretx' ? targetEvent : E;
           list.push({
             event: E,
             row,
@@ -443,6 +472,7 @@ export function buildSubeventsFromCapture(
             pretxK,
             targetEvent,
             sdu: null,
+            expectedSdu: originEventForSdu * cfg.bn + bFormula + capture.sduOriginOffset,
             chan: null,
             timeUs: estTimeUs,
             observed: false,

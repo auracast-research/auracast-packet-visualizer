@@ -241,6 +241,11 @@
     border-top: 2px solid var(--ink); border-bottom: 1px solid var(--hairline);
   }
   .event-divider:first-child { border-top: none; }
+  .event-status {
+    text-transform: none; letter-spacing: normal; font-weight: 600; font-size: 11.5px;
+  }
+  .event-status.lost { color: var(--critical); }
+  .event-status.degraded { color: var(--retx); }
   /* A faint alternating tint per event, distinct from the per-row hairlines between individual
      sub-events, so the eye can tell "new event" from "next sub-event" at a glance while
      scrolling — not just from the sticky header text. */

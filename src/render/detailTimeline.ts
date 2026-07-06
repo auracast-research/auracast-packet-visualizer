@@ -1,5 +1,5 @@
 import { $, cssVar, el, pingAt, reduceMotion } from '../dom';
-import { colorFor, roleDesc } from '../model/colors';
+import { colorFor, roleDesc, sduLabel } from '../model/colors';
 import { controlOffsetUs, estimateAirtimeUs, slotWidthUs, subeventTimeUs } from '../model/timing';
 import { estimateEventBaseUs } from '../pcapng/capture';
 import { appVars, state } from '../state';
@@ -31,6 +31,7 @@ interface DetailRow {
   s: number;
   timeUs: number | null;
   sdu?: number | null;
+  expectedSdu?: number;
   chan?: number | null;
   pduBytes?: number | null;
   observed?: boolean;
@@ -183,7 +184,9 @@ export function renderMinimap(model: Model): void {
         const rect = el('rect', attrs, svg);
         const descItem = { kind: item.kind, b: item.b ?? 0, g: item.g ?? 0, pretxK: item.pretxK ?? null, targetEvent: item.targetEvent ?? 0 };
         const titleParts = [
-          notObserved ? 'Not observed' : `SDU #${item.sdu}`,
+          notObserved
+            ? `Not observed - expected ${sduLabel(item.expectedSdu!, row, state.numBis)}`
+            : sduLabel(item.sdu!, row, state.numBis),
           roleDesc(descItem),
           `Event ${item.event}, sub-event ${item.s}${state.numBis > 1 ? `, BIS ${row + 1}` : ''}`,
           item.timeUs !== null ? `t = ${(item.timeUs! / 1000).toFixed(3)} ms` : null,
