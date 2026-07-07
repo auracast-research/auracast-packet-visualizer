@@ -48,8 +48,15 @@ export function parseBigComment(str: string): BigCommentFields {
 export function parsePacketComment(str: string): PacketCommentFields {
   const kv = tokenizeKeyValue(str);
   const num = (k: string) => (kv[k] !== undefined ? Number(kv[k]) : undefined);
+  // `kind=` carries a PDU-type prefix ("data" or "control") followed by optional
+  // retransmission/pretransmission suffixes — e.g. "control retransmission pretransmission" on a
+  // real LL Control PDU (channel map update, BIG termination, ...) that's been repeated with the
+  // same irc/pto-style redundancy as data. The "control" prefix must win over those suffixes:
+  // checking retransmission/pretransmission first (as this used to) misreads every control PDU
+  // as a plain pretx/retx BIS Data copy.
   let kindSimple: PacketCommentFields['kindSimple'] = 'new';
-  if (/pretransmission/.test(kv.kind || '')) kindSimple = 'pretx';
+  if (/^control\b/.test(kv.kind || '')) kindSimple = 'control';
+  else if (/pretransmission/.test(kv.kind || '')) kindSimple = 'pretx';
   else if (/retransmission/.test(kv.kind || '')) kindSimple = 'retx';
   return {
     event: num('event'),
@@ -57,6 +64,7 @@ export function parsePacketComment(str: string): PacketCommentFields {
     chan: num('chan'),
     se: num('se'),
     payloadNum: num('payload_num'),
+    bn: num('bn'),
     kindSimple,
     firstEventRx: /first_event_rx/.test(str),
   };

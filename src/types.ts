@@ -16,7 +16,11 @@ export interface PcapngOption {
   val: Uint8Array;
 }
 
-export type PacketKind = 'new' | 'retx' | 'pretx';
+// 'control' is a real captured LL Control PDU (channel map update, BIG termination, etc.) — it
+// shares the sub-event grid with BIS Data PDUs (same event/bis/se addressing, same irc/pto-style
+// redundancy) but isn't a data payload, so it's tracked as its own kind rather than folded into
+// new/retx/pretx.
+export type PacketKind = 'new' | 'retx' | 'pretx' | 'control';
 
 export interface BigCommentFields {
   numBis: number;
@@ -39,8 +43,22 @@ export interface PacketCommentFields {
   chan: number | undefined;
   se: number | undefined;
   payloadNum: number | undefined;
+  bn: number | undefined;
   kindSimple: PacketKind;
   firstEventRx: boolean;
+}
+
+// Decoded content of a real captured LL BIG Control PDU (see pcapng/controlPdu.ts). `kind` is
+// undefined when `ok` is false, or when the CtrlType byte didn't match either of the two known
+// BIG control opcodes (still worth surfacing as "captured but unrecognized" rather than nothing).
+export interface BigControlPduDecoded {
+  ok: boolean;
+  reason?: string;
+  ctrlType?: number;
+  kind?: 'channelMapUpdate' | 'terminate';
+  channels?: number[]; // channelMapUpdate only — used-channel indices, 0..36
+  reasonCode?: number; // terminate only — raw Reason byte (an HCI-style error code)
+  instant?: number; // both kinds — the BIG event count at which this takes effect
 }
 
 export interface BigInfoDecoded {
@@ -97,6 +115,8 @@ export interface PacketRow {
   tsUs: number;
   pduBytes: number;
   rank?: number;
+  // Only set when kindSimple === 'control' — the decoded content of a real LL BIG Control PDU.
+  controlPdu?: BigControlPduDecoded;
 }
 
 export interface BigInfoCrossCheck {
@@ -178,8 +198,18 @@ export interface Capture {
   allEventsRange: number[];
   totalPackets: number;
   rawUncommentedCount: number;
+  // Packets whose comment carried `bn=0` — never a real value (real `bn` cycles 1..cfg.bn) but
+  // seen from a real sniffer capture as an all-zero placeholder (event=0 bis=0 se=0 payload_num=0
+  // etc.) on packets the extcap tool captured but couldn't decode/correlate. Counted separately
+  // from rawUncommentedCount (which is packets with no comment at all) so a capture summary can
+  // report both instead of silently letting these masquerade as a real event 0.
+  droppedPlaceholderCount: number;
   fileName?: string;
   bigInfoRows: BigInfoRow[];
+  // Every real captured LL BIG Control PDU (kindSimple === 'control'), time-sorted — unlike
+  // bigInfoRows these land on a real, exact event number (they share the sub-event grid), so no
+  // interpolation is needed to place them on the whole-capture overview.
+  controlPdus: PacketRow[];
 }
 
 /** Config for the simulated (non-capture) model — buildSubevents/allCopiesOf. */
@@ -217,4 +247,6 @@ export interface CaptureSubeventItem {
   timeUs: number | null;
   observed: boolean;
   pduBytes: number | null;
+  // Only set when kind === 'control' and it was actually observed.
+  controlPdu?: BigControlPduDecoded;
 }

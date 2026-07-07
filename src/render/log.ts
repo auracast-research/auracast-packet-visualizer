@@ -3,8 +3,9 @@ import { badgeTextColor, colorFor, pretxColor, roleDesc, roleLabel, sduLabel } f
 import { allCopiesOf } from '../model/subevents';
 import { controlOffsetUs, subeventTimeUs } from '../model/timing';
 import { computeEventRecoveryStats } from '../pcapng/capture';
+import { describeControlPdu } from '../pcapng/controlPdu';
 import { appVars, state } from '../state';
-import type { CaptureSubeventItem, Model, SubeventItem } from '../types';
+import type { BigControlPduDecoded, CaptureSubeventItem, Model, SubeventItem } from '../types';
 import { jumpToEventWindow, windowEvents } from './overview';
 
 // A per-event summary tacked onto the log's sticky "Event N" header, so the reason for a
@@ -78,8 +79,21 @@ function threadHtmlCapture(sdu: number, row: number, altClass: string): string {
   const rowsHtml = copies
     .map((c) => {
       const color =
-        c.kindSimple === 'new' ? cssVar('--new') : c.kindSimple === 'retx' ? cssVar('--retx') : pretxColor(c.rank! - 1);
-      const label = c.kindSimple === 'new' ? 'NEW' : c.kindSimple === 'retx' ? 'RTX' + c.rank : 'PRE' + c.rank;
+        c.kindSimple === 'new'
+          ? cssVar('--new')
+          : c.kindSimple === 'retx'
+            ? cssVar('--retx')
+            : c.kindSimple === 'control'
+              ? cssVar('--control')
+              : pretxColor(c.rank! - 1);
+      const label =
+        c.kindSimple === 'new'
+          ? 'NEW'
+          : c.kindSimple === 'retx'
+            ? 'RTX' + c.rank
+            : c.kindSimple === 'control'
+              ? 'CTRL'
+              : 'PRE' + c.rank;
       const timeMs = ((c.tsUs - capture.originUs) / 1000).toFixed(3);
       // Every copy here is a real, observed packet with a genuine (row, event, sub-event)
       // slot — always jumpable, shifting the window to bring its event into view first if it
@@ -119,6 +133,7 @@ interface LogRow {
   targetEvent?: number;
   b?: number;
   g?: number | null;
+  controlPdu?: BigControlPduDecoded;
 }
 
 export function renderLog(model: Model): void {
@@ -198,6 +213,27 @@ export function renderLog(model: Model): void {
     const colorItem = { kind: item.kind!, pretxK: item.pretxK ?? null };
     const roleItem = { kind: item.kind!, g: item.g ?? 0, pretxK: item.pretxK ?? null };
     const descItem = { kind: item.kind!, b: item.b ?? 0, g: item.g ?? 0, pretxK: item.pretxK ?? null, targetEvent: item.targetEvent ?? 0 };
+
+    // A real captured LL Control PDU (see comments.ts's `kind=control` handling) — it's not a
+    // BIS payload, so it gets its own non-expandable row (reusing the simulated CTRL row's
+    // `.control-row` styling/click-exclusion) rather than being labeled/expanded as an SDU.
+    if (isCapture && item.kind === 'control') {
+      const color = colorFor(colorItem);
+      const { title: ctrlTitle, desc: ctrlDesc } = describeControlPdu(item.controlPdu);
+      html += `<div class="msg-row control-row${altClass}" id="${rowIdSafe}">
+          <span class="posbar"><i style="left:${posLeftPx.toFixed(2)}px; background:${color}"></i></span>
+          <span class="roletag" style="background:${color}; color:${badgeTextColor(color)}">${roleLabel(roleItem)}</span>
+          ${state.numBis > 1 ? `<span class="bistag">BIS ${item.row + 1}</span>` : ''}
+          ${chanTag}
+          ${pduTag}
+          <span class="msg-main">
+            <span class="msg-title">${ctrlTitle}</span>
+            <span class="msg-desc">${ctrlDesc}</span>
+          </span>
+          <span class="msg-time mono">${timeLabel}</span>
+        </div>`;
+      return;
+    }
 
     if (isCapture && !item.observed) {
       html += `<div class="msg-row not-observed${altClass}" id="${rowIdSafe}">

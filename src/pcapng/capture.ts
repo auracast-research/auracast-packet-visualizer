@@ -1,5 +1,6 @@
 import { decodeBigInfoFromRawPacket } from './biginfo';
 import { parseBigComment, parsePacketComment } from './comments';
+import { decodeBigControlPduFromRawPacket } from './controlPdu';
 import type {
   BigInfoCrossCheck,
   BigInfoDecoded,
@@ -116,10 +117,22 @@ export function buildCaptureFromPackets(packets: RawPacket[]): Capture {
   // spec-accurate encoding) — capLen is at least a real, structurally-guaranteed number.
   const PDU_OVERHEAD_BYTES = 19;
   const rows: PacketRow[] = [];
+  let droppedPlaceholderCount = 0;
   for (const p of packets) {
     if (!p.comment || p.comment.startsWith('BIG ')) continue;
     const pc = parsePacketComment(p.comment);
     if (pc.event === undefined || pc.bis === undefined || pc.se === undefined) continue;
+    // `bn=0` never occurs on a genuine BIS Data PDU comment (real `bn` cycles 1..cfg.bn) — it's
+    // what a real sniffer capture emits on a packet it captured but couldn't decode/correlate,
+    // as an all-zero placeholder (event=0 bis=0 se=0 payload_num=0 ...). Confirmed directly
+    // against a real capture where 6 such rows, left unfiltered, register as a spurious "event
+    // 0" and blow eventsSorted/allEventsRange out to span from 0 instead of the capture's real
+    // first event — which then opens the just-loaded view on a multi-thousand-event dead zone
+    // that looks like the capture failed to parse.
+    if (pc.bn === 0) {
+      droppedPlaceholderCount++;
+      continue;
+    }
     rows.push({
       event: pc.event,
       bis: pc.bis,
@@ -130,6 +143,7 @@ export function buildCaptureFromPackets(packets: RawPacket[]): Capture {
       firstEventRx: pc.firstEventRx,
       tsUs: p.tsUs,
       pduBytes: Math.max(p.capLen - PDU_OVERHEAD_BYTES, 0),
+      ...(pc.kindSimple === 'control' ? { controlPdu: decodeBigControlPduFromRawPacket(p.bytes) } : {}),
     });
   }
   rows.sort((a, b) => a.tsUs - b.tsUs);
@@ -173,6 +187,11 @@ export function buildCaptureFromPackets(packets: RawPacket[]): Capture {
   const copiesByPayload = new Map<string, PacketRow[]>(); // "row:payloadNum" -> [rows] sorted by time, with rank
   for (const r of rows) {
     byKey.set(`${r.event}:${r.bis - 1}:${r.se}`, r);
+    // A control PDU's `payload_num` isn't a real SDU id — it reuses the same numbering space and
+    // was confirmed directly to collide with a genuine BIS Data payload's payload_num on the same
+    // BIS. Grouping it into that payload's copiesByPayload bucket would show it as if it were one
+    // of that SDU's redundant copies when expanding the SDU's thread.
+    if (r.kindSimple === 'control') continue;
     const pk = `${r.bis - 1}:${r.payloadNum}`;
     if (!copiesByPayload.has(pk)) copiesByPayload.set(pk, []);
     copiesByPayload.get(pk)!.push(r);
@@ -187,6 +206,8 @@ export function buildCaptureFromPackets(packets: RawPacket[]): Capture {
       else r.rank = 0;
     }
   }
+
+  const controlPdus = rows.filter((r) => r.kindSimple === 'control'); // `rows` is already tsUs-sorted
 
   const eventsSorted = [...new Set(rows.map((r) => r.event))].sort((a, b) => a - b);
   const regimeFromRatio: Capture['regimeFromRatio'] =
@@ -235,6 +256,7 @@ export function buildCaptureFromPackets(packets: RawPacket[]): Capture {
     originUs,
     sduOriginOffset,
     bigInfoRows,
+    controlPdus,
     // The full contiguous event-number span, including numbers with zero captured packets (an
     // entirely missed event) — used for navigation/overview so a total gap is shown as "not
     // observed" rather than silently skipped.
@@ -246,6 +268,7 @@ export function buildCaptureFromPackets(packets: RawPacket[]): Capture {
       : [],
     totalPackets: packets.length,
     rawUncommentedCount: packets.filter((p) => !p.comment).length,
+    droppedPlaceholderCount,
   };
 }
 
@@ -281,12 +304,19 @@ export function computeEventRecoveryStats(capture: Capture, event: number): Even
   for (let row = 0; row < cfg.numBis; row++) {
     for (let b = 0; b < cfg.bn; b++) {
       let copiesObserved = 0;
+      // A slot can be occupied by a real LL Control PDU instead of the scheduled BIS Data copy
+      // (confirmed directly: a real capture's control PDUs land exactly on what would otherwise
+      // be a pre-transmission slot) — that's the control PDU pre-empting the airtime, not a copy
+      // of this payload, so it must NOT count toward copiesObserved or this payload reads as
+      // "recovered" from a redundancy slot that never actually carried it.
       for (let g = 0; g < cfg.irc; g++) {
-        if (capture.byKey.has(`${event}:${row}:${g * cfg.bn + b}`)) copiesObserved++;
+        const r = capture.byKey.get(`${event}:${row}:${g * cfg.bn + b}`);
+        if (r && r.kindSimple !== 'control') copiesObserved++;
       }
       for (let k = 0; k < cfg.npt; k++) {
         const srcEvent = event - cfg.pto * (k + 1);
-        if (capture.byKey.has(`${srcEvent}:${row}:${(cfg.irc + k) * cfg.bn + b}`)) copiesObserved++;
+        const r = capture.byKey.get(`${srcEvent}:${row}:${(cfg.irc + k) * cfg.bn + b}`);
+        if (r && r.kindSimple !== 'control') copiesObserved++;
       }
       if (copiesObserved === 0) {
         lostPayloads++;
@@ -439,6 +469,7 @@ export function buildSubeventsFromCapture(
             timeUs: real.tsUs - capture.originUs,
             observed: true,
             pduBytes: real.pduBytes,
+            ...(real.controlPdu ? { controlPdu: real.controlPdu } : {}),
           });
         } else {
           // Never captured. Infer its role from position using the config we already know

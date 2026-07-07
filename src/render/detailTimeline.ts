@@ -2,8 +2,9 @@ import { $, cssVar, el, pingAt, reduceMotion } from '../dom';
 import { colorFor, roleDesc, sduLabel } from '../model/colors';
 import { controlOffsetUs, estimateAirtimeUs, slotWidthUs, subeventTimeUs } from '../model/timing';
 import { estimateEventBaseUs } from '../pcapng/capture';
+import { describeControlPdu } from '../pcapng/controlPdu';
 import { appVars, state } from '../state';
-import type { CaptureSubeventItem, Model, SubeventItem } from '../types';
+import type { BigControlPduDecoded, CaptureSubeventItem, Model, SubeventItem } from '../types';
 import { jumpToEventWindow, windowEvents } from './overview';
 import { selectRow } from './log';
 
@@ -40,6 +41,7 @@ interface DetailRow {
   g?: number | null;
   pretxK?: number | null;
   targetEvent?: number;
+  controlPdu?: BigControlPduDecoded;
 }
 
 // The detail timeline: the same fidelity in both modes — individual sub-event ticks per BIS
@@ -183,11 +185,14 @@ export function renderMinimap(model: Model): void {
         } else attrs.fill = colorFor(colorItem);
         const rect = el('rect', attrs, svg);
         const descItem = { kind: item.kind, b: item.b ?? 0, g: item.g ?? 0, pretxK: item.pretxK ?? null, targetEvent: item.targetEvent ?? 0 };
+        const controlDesc = item.kind === 'control' ? describeControlPdu(item.controlPdu) : null;
         const titleParts = [
-          notObserved
-            ? `Not observed - expected ${sduLabel(item.expectedSdu!, row, state.numBis)}`
-            : sduLabel(item.sdu!, row, state.numBis),
-          roleDesc(descItem),
+          controlDesc
+            ? controlDesc.title
+            : notObserved
+              ? `Not observed - expected ${sduLabel(item.expectedSdu!, row, state.numBis)}`
+              : sduLabel(item.sdu!, row, state.numBis),
+          controlDesc ? controlDesc.desc : roleDesc(descItem),
           `Event ${item.event}, sub-event ${item.s}${state.numBis > 1 ? `, BIS ${row + 1}` : ''}`,
           item.timeUs !== null ? `t = ${(item.timeUs! / 1000).toFixed(3)} ms` : null,
           isCapture && item.chan !== null && item.chan !== undefined ? `channel ${item.chan}` : null,

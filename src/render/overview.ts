@@ -2,6 +2,7 @@ import { $, cssVar, el } from '../dom';
 import { sduLabel } from '../model/colors';
 import { extractEnhancedPackets } from '../pcapng/blocks';
 import { buildCaptureFromPackets, computeEventRecoveryStats, estimateEventIndexForTimeUs } from '../pcapng/capture';
+import { describeControlPdu } from '../pcapng/controlPdu';
 import { appVars, state } from '../state';
 import { setDrawerEditable, syncControlsFromState } from './drawer';
 
@@ -75,7 +76,10 @@ export function renderCaptureSummary(): void {
     bigInfoLine +
     (capture.ptoConsistent
       ? ''
-      : `<span class="packing-invalid">PTO offset was inconsistent across pre-transmissions — using the most common value.</span>`);
+      : `<span class="packing-invalid">PTO offset was inconsistent across pre-transmissions — using the most common value.</span>`) +
+    (capture.droppedPlaceholderCount > 0
+      ? `<br><span class="packing-invalid">${capture.droppedPlaceholderCount} packet(s) had an undecodable placeholder comment ("bn=0") and were dropped.</span>`
+      : '');
   ($('capturePrev') as HTMLButtonElement).disabled = state.windowStartIdx <= 0;
   ($('captureNext') as HTMLButtonElement).disabled =
     state.windowStartIdx + state.eventsShown >= capture.allEventsRange.length;
@@ -155,6 +159,15 @@ export function renderMinimapCapture(): void {
   // possible at this zoom level.
   const selectedEvent = appVars.expandedKey ? Number(appVars.expandedKey.split(':')[1]) : null;
 
+  // Unlike bigInfoRows (placed by interpolated real time — periodic advertising runs on its own
+  // cadence), a captured control PDU shares the sub-event grid and so lands on an exact, real
+  // event number — no interpolation needed, just a lookup keyed by that event.
+  const controlPdusByEvent = new Map<number, typeof capture.controlPdus>();
+  for (const r of capture.controlPdus) {
+    if (!controlPdusByEvent.has(r.event)) controlPdusByEvent.set(r.event, []);
+    controlPdusByEvent.get(r.event)!.push(r);
+  }
+
   const barW = Math.max(vw / viewLen, 1);
   viewSlice.forEach((E, iRel) => {
     const i = viewStart + iRel;
@@ -203,6 +216,33 @@ export function renderMinimapCapture(): void {
       if (appVars.mmDidDrag) return; // this click followed a drag — don't also jump the window
       jumpToEventWindow(i - Math.floor(state.eventsShown / 2));
     });
+
+    // A real captured LL BIG Control PDU (channel map update, BIG termination, ...) — flagged as
+    // a small triangle below the bar, distinct in shape and color from the BIGInfo diamonds
+    // above it, since the two are unrelated real-capture phenomena that can both land near the
+    // same event.
+    const controlHere = controlPdusByEvent.get(E);
+    if (controlHere) {
+      const cx = x + Math.max(barW - 0.3, 0.6) / 2;
+      const cy = vh - 5;
+      const r = 4;
+      const marker = el(
+        'path',
+        { class: 'mm-control-marker', d: `M ${cx} ${cy - r} L ${cx + r} ${cy + r} L ${cx - r} ${cy + r} Z` },
+        svg,
+      );
+      const descs = controlHere.map((cp) => {
+        const d = describeControlPdu(cp.controlPdu);
+        return `${d.title}: ${d.desc}`;
+      });
+      el('title', {}, marker).textContent =
+        `Event ${E} — ${controlHere.length > 1 ? `${controlHere.length} control PDUs` : 'control PDU'}:\n${descs.join('\n')}`;
+      marker.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        if (appVars.mmDidDrag) return;
+        jumpToEventWindow(i - Math.floor(state.eventsShown / 2));
+      });
+    }
   });
 
   const winStartRel = state.windowStartIdx - viewStart;

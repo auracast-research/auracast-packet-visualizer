@@ -218,6 +218,11 @@
      shape and color from the role-colored BIS sub-event ticks, since it isn't one of them. */
   .mm-biginfo { fill: var(--biginfo); cursor: pointer; }
   .mm-biginfo:hover { opacity: 0.8; }
+  /* A real captured LL BIG Control PDU (channel map update, BIG termination, ...) on the
+     whole-capture overview — a small triangle below the bar, distinct from the BIGInfo diamond
+     above it. */
+  .mm-control-marker { fill: var(--control); cursor: pointer; }
+  .mm-control-marker:hover { opacity: 0.8; }
   /* Dimension brackets — one labeled span per interval (Sub_Interval, BIS_Spacing,
      ISO_Interval), drafting-diagram style: end ticks, a line between them, a label pill
      floating on top. Inspired by the Bluetooth Core Spec's own BIS timing figures, not a

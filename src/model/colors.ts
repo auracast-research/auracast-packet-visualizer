@@ -11,12 +11,14 @@ export function pretxColor(k: number): string {
 export function colorFor(item: { kind: PacketKind; pretxK: number | null }): string {
   if (item.kind === 'new') return cssVar('--new');
   if (item.kind === 'retx') return cssVar('--retx');
+  if (item.kind === 'control') return cssVar('--control');
   return pretxColor(item.pretxK!);
 }
 
 export function roleLabel(item: { kind: PacketKind; g: number; pretxK: number | null }): string {
   if (item.kind === 'new') return 'NEW';
   if (item.kind === 'retx') return 'RTX' + item.g;
+  if (item.kind === 'control') return 'CTRL';
   return 'PRE' + (item.pretxK! + 1);
 }
 
@@ -37,6 +39,7 @@ export function roleDesc(item: {
 }): string {
   if (item.kind === 'new') return 'New transmission';
   if (item.kind === 'retx') return `Repeats burst ${item.b} of this event (group ${item.g})`;
+  if (item.kind === 'control') return 'LL Control PDU (e.g. channel map update, BIG termination) — not audio payload';
   const n = item.pretxK! + 1;
   return `Pre-transmits event ${item.targetEvent}, ${n} event${n > 1 ? 's' : ''} early`;
 }
