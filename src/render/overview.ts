@@ -45,6 +45,35 @@ export function setCaptureLoadState(kind: string, msg: string): void {
   el2.textContent = msg;
 }
 
+// Lets a capture that only reliably received a subset of the BIG's BIS (e.g. only BIS 1 of a
+// 2-BIS stream) score completeness over just those rows instead of forever reading "missing" for
+// a BIS that was never meant to be captured. Rebuilt every render (cheap — at most a few dozen
+// checkboxes) so it always reflects the currently loaded capture's own numBis; the last remaining
+// checked box is disabled so completeness scoring can't be narrowed down to nothing.
+function renderCompletenessRows(): void {
+  const container = $('completenessRows');
+  const capture = appVars.capture;
+  if (!capture || capture.config.numBis <= 1) {
+    container.style.display = 'none';
+    return;
+  }
+  container.style.display = 'flex';
+  const includedCount = state.completenessRows.filter(Boolean).length;
+  container.innerHTML =
+    `<span class="hint" style="margin:0;">Count toward completeness:</span>` +
+    Array.from({ length: capture.config.numBis }, (_, row) => {
+      const checked = state.completenessRows[row] !== false;
+      const isSoleChecked = checked && includedCount <= 1;
+      return `<label class="mm-checkbox"><input type="checkbox" data-bis-row="${row}" ${checked ? 'checked' : ''} ${isSoleChecked ? 'disabled title="At least one BIS must count toward completeness"' : ''}> BIS ${row + 1}</label>`;
+    }).join('');
+  container.querySelectorAll<HTMLInputElement>('[data-bis-row]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      state.completenessRows[Number(cb.dataset.bisRow)] = cb.checked;
+      appVars.recompute();
+    });
+  });
+}
+
 export function renderCaptureSummary(): void {
   const box = $('captureSummary');
   const nav = $('captureNav');
@@ -53,10 +82,12 @@ export function renderCaptureSummary(): void {
     box.textContent = '';
     box.style.display = 'none';
     nav.style.display = 'none';
+    $('completenessRows').style.display = 'none';
     return;
   }
   box.style.display = '';
   nav.style.display = 'flex';
+  renderCompletenessRows();
   const regimeNote =
     capture.packingDeclared && capture.packingDeclared !== capture.regimeFromRatio
       ? ` (file says "${capture.packingDeclared}" — mismatch!)`
@@ -79,6 +110,9 @@ export function renderCaptureSummary(): void {
       : `<span class="packing-invalid">PTO offset was inconsistent across pre-transmissions — using the most common value.</span>`) +
     (capture.droppedPlaceholderCount > 0
       ? `<br><span class="packing-invalid">${capture.droppedPlaceholderCount} packet(s) had an undecodable placeholder comment ("bn=0") and were dropped.</span>`
+      : '') +
+    (state.completenessRows.some((included) => !included)
+      ? `<br><span class="packing-invalid">Completeness computed over BIS ${state.completenessRows.flatMap((included, row) => (included ? [row + 1] : [])).join(', ')} only.</span>`
       : '');
   ($('capturePrev') as HTMLButtonElement).disabled = state.windowStartIdx <= 0;
   ($('captureNext') as HTMLButtonElement).disabled =
@@ -98,6 +132,9 @@ export function loadCaptureFile(file: File): void {
       state.mmViewStart = 0;
       state.mmZoomLen = capture.allEventsRange.length;
       state.detailZoom = 1;
+      // All BIS included by default — a no-op on completeness scoring until the user narrows it
+      // down to whichever BIS this capture actually received.
+      state.completenessRows = Array(capture.config.numBis).fill(true);
       Object.assign(state, capture.config);
       syncControlsFromState();
       setDrawerEditable(false);
@@ -176,7 +213,7 @@ export function renderMinimapCapture(): void {
     // recoverable via at least one of its scheduled copies (new/retx/pretx), not just "how many
     // raw sub-event packets landed exactly on this event's own slots" (that would flag a
     // payload as missing even when a pre-transmission elsewhere already delivered it).
-    const stats = computeEventRecoveryStats(capture, E);
+    const stats = computeEventRecoveryStats(capture, E, state.completenessRows);
     const color =
       stats.status === 'lost'
         ? cssVar('--critical')

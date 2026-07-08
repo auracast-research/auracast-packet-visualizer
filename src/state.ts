@@ -22,6 +22,7 @@ export const state: State = {
   mmZoomLen: 0, // how many events the overview viewport currently spans (0 = not yet set / fit-all)
   detailZoom: 1, // width multiplier for the sub-event detail timeline; 1 = fit its container
   showBigInfo: false, // capture mode only: show periodic-advertising/BIGInfo markers on both timelines
+  completenessRows: [], // capture mode only: sized/reset to all-true on capture load, see State's own doc
 };
 
 interface MinimapDrag {

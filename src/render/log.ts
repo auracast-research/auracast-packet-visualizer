@@ -16,7 +16,7 @@ const MAX_NAMED_MISSING = 6;
 function eventHeaderStatusHtml(event: number): string {
   const capture = appVars.capture;
   if (state.mode !== 'capture' || !capture) return '';
-  const stats = computeEventRecoveryStats(capture, event);
+  const stats = computeEventRecoveryStats(capture, event, state.completenessRows);
   if (stats.status === 'full') return '';
   if (stats.status === 'degraded') {
     const degraded = stats.totalPayloads - stats.fullPayloads;

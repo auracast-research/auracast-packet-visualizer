@@ -167,6 +167,12 @@ export interface State {
   mmZoomLen: number;
   detailZoom: number;
   showBigInfo: boolean;
+  // Capture mode only — which 0-based BIS rows count toward completeness/recovery stats (event
+  // overview coloring, per-event header status). Lets a capture that only reliably received a
+  // subset of the BIG's BIS (e.g. only BIS 1 of a 2-BIS stream) score complete events as complete
+  // instead of forever "missing" the uncaptured BIS. Sized to capture.config.numBis and reset to
+  // all-true whenever a new capture loads.
+  completenessRows: boolean[];
 }
 
 /** One real, on-air BIGInfo transmission (periodic advertising carrying the BIG's timing info)

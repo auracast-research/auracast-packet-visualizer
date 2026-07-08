@@ -294,14 +294,27 @@ export interface EventRecoveryStats {
 // itself and `npt` pre-transmission copies scheduled at earlier events (E - pto*(k+1)) — a
 // payload only counts as lost if NONE of those (irc + npt) scheduled slots were observed
 // anywhere, matching the same recoverability notion threadHtmlCapture already reports per SDU.
-export function computeEventRecoveryStats(capture: Capture, event: number): EventRecoveryStats {
+// `includedRows` (0-based, from state.completenessRows) lets a capture that only reliably
+// received a subset of the BIG's BIS score completeness over just those rows — a BIS excluded
+// here is skipped entirely rather than contributing permanent "missing" payloads. Undefined, or a
+// row past the array's end, defaults to included (so callers that don't care about this still get
+// the original all-BIS behavior).
+export function computeEventRecoveryStats(
+  capture: Capture,
+  event: number,
+  includedRows?: boolean[],
+): EventRecoveryStats {
   const cfg = capture.config;
+  const isIncluded = (row: number) => includedRows === undefined || includedRows[row] !== false;
   const copiesExpected = cfg.irc + cfg.npt;
+  let includedRowCount = 0;
   let lostPayloads = 0;
   let partialPayloads = 0;
   let fullPayloads = 0;
   const missingSdus: MissingSdu[] = [];
   for (let row = 0; row < cfg.numBis; row++) {
+    if (!isIncluded(row)) continue;
+    includedRowCount++;
     for (let b = 0; b < cfg.bn; b++) {
       let copiesObserved = 0;
       // A slot can be occupied by a real LL Control PDU instead of the scheduled BIS Data copy
@@ -325,7 +338,7 @@ export function computeEventRecoveryStats(capture: Capture, event: number): Even
       else partialPayloads++;
     }
   }
-  const totalPayloads = cfg.numBis * cfg.bn;
+  const totalPayloads = includedRowCount * cfg.bn;
   const status: EventRecoveryStats['status'] =
     lostPayloads > 0 ? 'lost' : fullPayloads < totalPayloads ? 'degraded' : 'full';
   return { totalPayloads, lostPayloads, partialPayloads, fullPayloads, status, missingSdus };
