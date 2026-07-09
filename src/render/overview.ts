@@ -88,26 +88,15 @@ export function renderCaptureSummary(): void {
   box.style.display = '';
   nav.style.display = 'flex';
   renderCompletenessRows();
-  const regimeNote =
-    capture.packingDeclared && capture.packingDeclared !== capture.regimeFromRatio
-      ? ` (file says "${capture.packingDeclared}" — mismatch!)`
-      : '';
-  let bigInfoLine = '';
-  if (capture.bigInfoSource === 'raw-biginfo') {
-    bigInfoLine = `Config source: <b>decoded from raw BIGInfo</b> (packet had no summary comment)<br>`;
-  } else if (capture.bigInfoCrossCheck && !capture.bigInfoCrossCheck.matched) {
-    bigInfoLine = `<span class="packing-invalid">Raw BIGInfo decode disagrees with the summary comment on: ${capture.bigInfoCrossCheck.mismatches.join(', ')}</span><br>`;
-  } else if (!capture.bigInfoCrossCheck) {
-    bigInfoLine = `Raw BIGInfo: no decodable packet found (relying on the summary comment only)<br>`;
-  }
   box.innerHTML =
     `<b>${capture.eventsSorted.length}</b> events captured (#${capture.eventsSorted[0]}–#${capture.eventsSorted[capture.eventsSorted.length - 1]})<br>` +
     `<b>${capture.rows.length}</b> annotated sub-event packets, <b>${capture.rawUncommentedCount}</b> raw/undecoded (periodic advertising)<br>` +
-    `Derived packing: <b>${capture.regimeFromRatio}</b>${regimeNote}<br>` +
-    bigInfoLine +
-    (capture.ptoConsistent
-      ? ''
-      : `<span class="packing-invalid">PTO offset was inconsistent across pre-transmissions — using the most common value.</span>`) +
+    `Derived packing: <b>${capture.regimeFromRatio}</b><br>` +
+    (!capture.ptoConsistent
+      ? `<span class="packing-invalid">PTO offset was inconsistent across pre-transmissions — using the most common value.</span>`
+      : capture.ptoSource === 'biginfo-fallback'
+        ? `<span class="packing-invalid">No pre-transmission packets were captured — PTO is from the raw BIGInfo decode, not confirmed empirically.</span>`
+        : '') +
     (capture.droppedPlaceholderCount > 0
       ? `<br><span class="packing-invalid">${capture.droppedPlaceholderCount} packet(s) had an undecodable placeholder comment ("bn=0") and were dropped.</span>`
       : '') +

@@ -9,16 +9,9 @@
     "isoIntervalMs": 30,
     "sduIntervalMs": 10,
     "maxPdu": 120,
-    "numBis": 2,
-    "phyMbps": 2
+    "numBis": 2
   },
   "nse": 9,
-  "packingDeclared": "interleaved",
-  "bigInfoSource": "comment",
-  "bigInfoCrossCheck": {
-    "mismatches": [],
-    "matched": true
-  },
   "regimeFromRatio": "interleaved",
   "ptoConsistent": true,
   "totalPackets": 7552,

@@ -22,21 +22,6 @@ export interface PcapngOption {
 // new/retx/pretx.
 export type PacketKind = 'new' | 'retx' | 'pretx' | 'control';
 
-export interface BigCommentFields {
-  numBis: number;
-  bn: number;
-  ircConfig: number;
-  ptcTotal: number;
-  nse: number;
-  subIntervalUs: number;
-  bisSpacingUs: number;
-  isoIntervalUs: number;
-  sduIntervalUs: number;
-  maxPdu: number;
-  phyMbps: number | null;
-  packingDeclared: string | undefined;
-}
-
 export interface PacketCommentFields {
   event: number | undefined;
   bis: number | undefined;
@@ -119,11 +104,6 @@ export interface PacketRow {
   controlPdu?: BigControlPduDecoded;
 }
 
-export interface BigInfoCrossCheck {
-  mismatches: string[];
-  matched: boolean;
-}
-
 export interface CaptureConfig {
   bn: number;
   irc: number;
@@ -135,6 +115,8 @@ export interface CaptureConfig {
   sduIntervalMs: number;
   maxPdu: number;
   numBis: number;
+  // Never set by capture parsing — BIGInfo doesn't encode which PHY was used, so this stays
+  // whatever the caller (mode-switch / user selection) already had. See buildCaptureFromPackets.
   phyMbps?: number;
 }
 
@@ -184,12 +166,19 @@ export interface BigInfoRow {
 export interface Capture {
   config: CaptureConfig;
   nse: number;
-  packingDeclared: string | undefined | null;
-  bigInfoSource: 'comment' | 'raw-biginfo';
-  bigInfoRaw: BigInfoDecoded | null;
-  bigInfoCrossCheck: BigInfoCrossCheck | null;
+  // Config (numBis/bn/irc/nse/pto/timing) is decoded exclusively from the raw BIGInfo bit field —
+  // never from a synthetic "BIG ..." summary comment, even when one is present in the file. A
+  // real capture (test3.pcapng) turned up a summary comment with values impossible for BIGInfo's
+  // own bit widths (e.g. nse=227 in a 5-bit field, max 31) while the raw decode was spec-valid and
+  // matched the actual captured packets — so the free-text comment can't be trusted as a config
+  // source and is only ever used for per-packet fields (event/bis/se/kind/payload_num).
+  bigInfoRaw: BigInfoDecoded;
   regimeFromRatio: 'sequential' | 'interleaved';
   ptoConsistent: boolean;
+  // 'measured': derived from real pretx-tagged packets (the normal, most-trusted case).
+  // 'biginfo-fallback': no pretx packets were captured at all, so `config.pto` falls back to the
+  // value decoded straight from BIGInfo's own bit field instead of a groundless 0.
+  ptoSource: 'measured' | 'biginfo-fallback';
   rows: PacketRow[];
   byKey: Map<string, PacketRow>;
   copiesByPayload: Map<string, PacketRow[]>;

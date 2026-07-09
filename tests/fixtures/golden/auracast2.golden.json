@@ -12,9 +12,6 @@
     "numBis": 2
   },
   "nse": 9,
-  "packingDeclared": null,
-  "bigInfoSource": "raw-biginfo",
-  "bigInfoCrossCheck": null,
   "regimeFromRatio": "interleaved",
   "ptoConsistent": true,
   "totalPackets": 14618,

@@ -25,9 +25,6 @@ describe.each(['auracast', 'auracast2', 'auracast3'])(
     it('matches config, derived regime, and BIGInfo cross-check', () => {
       expect(capture.config).toEqual(golden.config);
       expect(capture.nse).toBe(golden.nse);
-      expect(capture.packingDeclared).toBe(golden.packingDeclared);
-      expect(capture.bigInfoSource).toBe(golden.bigInfoSource);
-      expect(capture.bigInfoCrossCheck).toEqual(golden.bigInfoCrossCheck);
       expect(capture.regimeFromRatio).toBe(golden.regimeFromRatio);
       expect(capture.ptoConsistent).toBe(golden.ptoConsistent);
     });

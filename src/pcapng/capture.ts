@@ -1,8 +1,7 @@
 import { decodeBigInfoFromRawPacket } from './biginfo';
-import { parseBigComment, parsePacketComment } from './comments';
+import { parsePacketComment } from './comments';
 import { decodeBigControlPduFromRawPacket } from './controlPdu';
 import type {
-  BigInfoCrossCheck,
   BigInfoDecoded,
   BigInfoRow,
   Capture,
@@ -21,20 +20,32 @@ import type {
 // actually the *count* of pretx sub-events (irc-groups x bn), not the PTO offset; PTO is
 // measured from real event deltas instead.
 export function buildCaptureFromPackets(packets: RawPacket[]): Capture {
-  const bigPkt = packets.find((p) => p.comment?.startsWith('BIG '));
-
-  // Decode BIGInfo straight from the raw, uncommented periodic-advertising packets — this is
-  // what a real sniffer capture (without a synthetic summary comment) would have to rely on.
-  // Also collects the timestamp of EVERY such packet (not just the first) — periodic
-  // advertising happens independently of the BIS sub-event grid, at its own cadence, so every
-  // instance is a real event worth being able to show on the timelines, not just one
-  // representative sample for config derivation.
+  // Config (numBis/bn/irc/nse/timing) comes exclusively from decoding BIGInfo's own bit field on
+  // the raw periodic-advertising packets — never from a synthetic "BIG ..." summary comment, even
+  // when a packet carries one. A real capture (test3.pcapng) turned up a summary comment whose
+  // values were impossible for BIGInfo's own bit widths (nse=227 in a 5-bit field, max 31; bn=67
+  // in a 3-bit field, max 7; num_bis=88 in a 5-bit field, max 31) while every actually-captured
+  // data packet only ever used bis 1-2, matching the raw decode exactly. The comment is free text
+  // written by whatever produced the capture — it isn't a spec-constrained encoding and can't be
+  // trusted as a config source, so it's ignored entirely here (per-packet comments are still used
+  // below for event/bis/se/kind/payload_num, which have no BIGInfo equivalent).
+  //
+  // Also collects the timestamp of EVERY decodable periodic-advertising packet (not just the
+  // first) — periodic advertising happens independently of the BIS sub-event grid, at its own
+  // cadence, so every instance is a real event worth being able to show on the timelines, not
+  // just one representative sample for config derivation.
   let bigInfoRaw: BigInfoDecoded | null = null;
   const bigInfoRows: BigInfoRow[] = [];
   for (const p of packets) {
     if (p.comment && !p.comment.startsWith('BIG ')) continue; // a BIS Data PDU comment, not BIGInfo
     if (p.comment) {
+      // A "BIG "-prefixed comment reliably tags this packet as periodic advertising regardless of
+      // whether its embedded numbers are trustworthy — the categorical tag and the numeric
+      // content are separate claims. Mark it for the timeline even if the bit-level decode below
+      // fails on it for some other reason.
       bigInfoRows.push({ tsUs: p.tsUs });
+      const decoded = decodeBigInfoFromRawPacket(p.bytes);
+      if (decoded.ok) bigInfoRaw ??= decoded;
       continue;
     }
     const decoded = decodeBigInfoFromRawPacket(p.bytes);
@@ -45,66 +56,23 @@ export function buildCaptureFromPackets(packets: RawPacket[]): Capture {
   }
   bigInfoRows.sort((a, b) => a.tsUs - b.tsUs);
 
-  if (!bigPkt && !bigInfoRaw) {
+  if (!bigInfoRaw) {
     throw new Error(
-      'No "BIG ..." summary comment and no decodable BIGInfo packet found — is this an Auracast BIS capture?',
+      'No decodable BIGInfo (periodic advertising) packet found — is this an Auracast BIS capture?',
     );
   }
 
-  let big: {
-    numBis: number;
-    bn: number;
-    ircConfig: number;
-    nse: number;
-    subIntervalUs: number;
-    bisSpacingUs: number;
-    isoIntervalUs: number;
-    sduIntervalUs: number;
-    maxPdu: number;
-    phyMbps: number | null;
-    packingDeclared: string | undefined | null;
+  const big = {
+    numBis: bigInfoRaw.numBis!,
+    bn: bigInfoRaw.bn!,
+    ircConfig: bigInfoRaw.irc!,
+    nse: bigInfoRaw.nse!,
+    subIntervalUs: bigInfoRaw.subIntervalUs!,
+    bisSpacingUs: bigInfoRaw.bisSpacingUs!,
+    isoIntervalUs: bigInfoRaw.isoIntervalMs! * 1000,
+    sduIntervalUs: bigInfoRaw.sduIntervalMs! * 1000,
+    maxPdu: bigInfoRaw.maxPdu!,
   };
-  let bigInfoSource: Capture['bigInfoSource'];
-  if (bigPkt) {
-    big = parseBigComment(bigPkt.comment!);
-    bigInfoSource = 'comment';
-  } else {
-    // Fall back to the raw decode as the config source when there's no annotation to read.
-    big = {
-      numBis: bigInfoRaw!.numBis!,
-      bn: bigInfoRaw!.bn!,
-      ircConfig: bigInfoRaw!.irc!,
-      nse: bigInfoRaw!.nse!,
-      subIntervalUs: bigInfoRaw!.subIntervalUs!,
-      bisSpacingUs: bigInfoRaw!.bisSpacingUs!,
-      isoIntervalUs: bigInfoRaw!.isoIntervalMs! * 1000,
-      sduIntervalUs: bigInfoRaw!.sduIntervalMs! * 1000,
-      maxPdu: bigInfoRaw!.maxPdu!,
-      phyMbps: null,
-      packingDeclared: null,
-    };
-    bigInfoSource = 'raw-biginfo';
-  }
-
-  // If we have BOTH a comment and a raw decode, cross-check them field by field — this is the
-  // strongest evidence either is trustworthy, and catches drift if a real capture's encoding
-  // differs from what was validated here.
-  let bigInfoCrossCheck: BigInfoCrossCheck | null = null;
-  if (bigPkt && bigInfoRaw) {
-    const checks: Array<[string, number, number]> = [
-      ['num_bis', big.numBis, bigInfoRaw.numBis!],
-      ['bn', big.bn, bigInfoRaw.bn!],
-      ['irc', big.ircConfig, bigInfoRaw.irc!],
-      ['nse', big.nse, bigInfoRaw.nse!],
-      ['sub_interval_us', big.subIntervalUs, bigInfoRaw.subIntervalUs!],
-      ['bis_spacing_us', big.bisSpacingUs, bigInfoRaw.bisSpacingUs!],
-      ['iso_interval_ms', big.isoIntervalUs / 1000, bigInfoRaw.isoIntervalMs!],
-      ['sdu_interval_ms', big.sduIntervalUs / 1000, bigInfoRaw.sduIntervalMs!],
-      ['max_pdu', big.maxPdu, bigInfoRaw.maxPdu!],
-    ];
-    const mismatches = checks.filter(([, a, b]) => Math.abs(a - b) > 0.01).map(([name]) => name!);
-    bigInfoCrossCheck = { mismatches, matched: mismatches.length === 0 };
-  }
 
   const gc = big.nse / big.bn;
   const npt = gc - big.ircConfig;
@@ -164,7 +132,13 @@ export function buildCaptureFromPackets(packets: RawPacket[]): Capture {
     ptoVotes[delta] = (ptoVotes[delta] || 0) + 1;
   }
   const ptoEntries = Object.entries(ptoVotes).sort((a, b) => b[1] - a[1]);
-  const pto = ptoEntries.length ? Number(ptoEntries[0]![0]) : 0;
+  // A capture can legitimately contain zero pre-transmission-tagged packets (e.g. a sniffer that
+  // never caught the pretx group) even though the BIG genuinely schedules one — confirmed
+  // directly against test3.pcapng, which has 0 pretx rows out of 3246 packets despite BIGInfo
+  // itself declaring PTO=1. In that case, fall back to the value already decoded straight from
+  // BIGInfo's own bit field rather than silently reporting 0 with no evidence either way.
+  const ptoSource: Capture['ptoSource'] = ptoEntries.length ? 'measured' : 'biginfo-fallback';
+  const pto = ptoEntries.length ? Number(ptoEntries[0]![0]) : bigInfoRaw.pto!;
   const ptoConsistent =
     ptoEntries.length <= 1 ||
     ptoEntries[0]![1] >= 0.95 * rows.filter((r) => r.kindSimple === 'pretx').length;
@@ -235,18 +209,14 @@ export function buildCaptureFromPackets(packets: RawPacket[]): Capture {
       sduIntervalMs: big.sduIntervalUs / 1000,
       maxPdu: big.maxPdu,
       numBis: big.numBis,
-      // BIGInfo itself doesn't signal which PHY was used, and the raw-decode fallback has no
-      // annotation to read it from either — only set phyMbps when we actually know it, so the
-      // caller's existing PHY selection is left alone rather than getting silently blanked.
-      ...(big.phyMbps != null ? { phyMbps: big.phyMbps } : {}),
+      // BIGInfo itself doesn't signal which PHY was used, so config.phyMbps is never set here —
+      // the caller's existing PHY selection is left alone rather than getting silently blanked.
     },
     nse: big.nse,
-    packingDeclared: big.packingDeclared,
-    bigInfoSource,
     bigInfoRaw,
-    bigInfoCrossCheck,
     regimeFromRatio,
     ptoConsistent,
+    ptoSource,
     rows,
     byKey,
     copiesByPayload,

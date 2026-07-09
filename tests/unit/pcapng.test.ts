@@ -2,11 +2,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { extractEnhancedPackets, parsePcapngBlocks } from '../../src/pcapng/blocks';
-import {
-  parseBigComment,
-  parsePacketComment,
-  tokenizeKeyValue,
-} from '../../src/pcapng/comments';
+import { parsePacketComment, tokenizeKeyValue } from '../../src/pcapng/comments';
 
 function loadFixtureArrayBuffer(name: string): ArrayBuffer {
   const buf = readFileSync(path.resolve(__dirname, '..', 'fixtures', name));
@@ -24,22 +20,6 @@ describe('tokenizeKeyValue', () => {
 
   it('returns an empty object for an empty string', () => {
     expect(tokenizeKeyValue('')).toEqual({});
-  });
-});
-
-describe('parseBigComment', () => {
-  it('parses a synthetic BIG summary comment', () => {
-    const parsed = parseBigComment(
-      'BIG num_bis=2 bn=4 irc=2 ptc=12 nse=12 sub_interval=400 bis_spacing=4800 ' +
-        'iso_interval=20000 sdu_interval=10000 max_pdu=40 phy=2M packing=sequential',
-    );
-    expect(parsed.numBis).toBe(2);
-    expect(parsed.bn).toBe(4);
-    expect(parsed.ircConfig).toBe(2);
-    expect(parsed.subIntervalUs).toBe(400);
-    expect(parsed.bisSpacingUs).toBe(4800);
-    expect(parsed.phyMbps).toBe(2);
-    expect(parsed.packingDeclared).toBe('sequential');
   });
 });
 
