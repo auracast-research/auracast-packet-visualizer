@@ -15,7 +15,19 @@ import type { BigControlPduDecoded } from '../types';
 // (PDU_BIG_CTRL_TYPE_CHAN_MAP_IND=0x00, PDU_BIG_CTRL_TYPE_TERM_IND=0x01) and verified directly:
 // every BIG_ChannelMap_Ind in a real capture decoded to a plausible, varying channel subset with
 // Instant consistently 10 events ahead of the packet's own captured event number.
-export function decodeBigControlPduFromRawPacket(bytes: Uint8Array): BigControlPduDecoded {
+//
+// `encrypted` (from BIGInfo — see decodeBigInfoFromRawPacket) must be passed in by the caller.
+// When true, this entire payload — including the CtrlType byte itself, not just the fields after
+// it — is ciphertext, so it's not just "not yet decoded", it's fundamentally unrecoverable
+// without the session key. Confirmed directly against test-enc.pcapng: its 3 real control PDUs'
+// first payload byte decoded to CtrlType 0x31/0xe4/0x80, none of which are real BIG CtrlTypes —
+// pure ciphertext. Bailing out before touching `payload[0]` avoids the sharper failure mode where
+// ciphertext happens to land on 0x00/0x01 and gets confidently misreported as a real channel-map
+// update or termination.
+export function decodeBigControlPduFromRawPacket(
+  bytes: Uint8Array,
+  encrypted: boolean,
+): BigControlPduDecoded {
   if (bytes.length < 10 + 6) return { ok: false, reason: 'too short for a PHY-header LE packet' };
   const lePacket = bytes.subarray(10);
   if (lePacket.length < 6) return { ok: false, reason: 'too short after pseudo-header' };
@@ -26,6 +38,13 @@ export function decodeBigControlPduFromRawPacket(bytes: Uint8Array): BigControlP
   if (lePacket.length < 6 + length) return { ok: false, reason: 'payload shorter than declared length' };
   const payload = lePacket.subarray(6, 6 + length);
   if (payload.length < 1) return { ok: false, reason: 'empty control PDU payload' };
+  if (encrypted) {
+    return {
+      ok: false,
+      encrypted: true,
+      reason: 'BIG is encrypted — control PDU payload is ciphertext, cannot decode without the session key',
+    };
+  }
 
   const ctrlType = payload[0]!;
   if (ctrlType === 0x00) {
@@ -50,6 +69,9 @@ export function decodeBigControlPduFromRawPacket(bytes: Uint8Array): BigControlP
 // Human-readable type name + content summary for a decoded control PDU — shared by the log and
 // detail-timeline renderers so the two stay in sync.
 export function describeControlPdu(cp: BigControlPduDecoded | undefined): { title: string; desc: string } {
+  if (cp?.encrypted) {
+    return { title: 'LL Control PDU (encrypted)', desc: 'BIG is encrypted — opcode and fields are ciphertext, not decodable' };
+  }
   if (!cp || !cp.ok || !cp.kind) {
     const reason = cp?.reason;
     return { title: 'LL Control PDU', desc: reason ? `Could not decode content: ${reason}` : 'Could not decode content' };

@@ -44,6 +44,11 @@ export interface BigControlPduDecoded {
   channels?: number[]; // channelMapUpdate only — used-channel indices, 0..36
   reasonCode?: number; // terminate only — raw Reason byte (an HCI-style error code)
   instant?: number; // both kinds — the BIG event count at which this takes effect
+  // Set (with ok:false) when the BIG is encrypted — the control PDU payload, including its own
+  // CtrlType byte, is ciphertext, so nothing about its content can be recovered without the
+  // session key. Distinguished from other ok:false cases (truncated PDU, unrecognized CtrlType)
+  // so the UI can say "encrypted" instead of implying a parse failure.
+  encrypted?: boolean;
 }
 
 export interface BigInfoDecoded {
@@ -63,6 +68,9 @@ export interface BigInfoDecoded {
   framing?: number;
   seedAccessAddress?: number;
   sduIntervalMs?: number;
+  // Whether the BIG is encrypted — derived from BIGInfo's own AD-structure byte length (33 vs 57
+  // octets), not a bit-field read. See decodeBigInfoFromRawPacket for why.
+  encrypted?: boolean;
 }
 
 /** Everything the timing/domain math needs, threaded explicitly rather than read off a global
@@ -115,6 +123,7 @@ export interface CaptureConfig {
   sduIntervalMs: number;
   maxPdu: number;
   numBis: number;
+  encrypted: boolean;
   // Never set by capture parsing — BIGInfo doesn't encode which PHY was used, so this stays
   // whatever the caller (mode-switch / user selection) already had. See buildCaptureFromPackets.
   phyMbps?: number;

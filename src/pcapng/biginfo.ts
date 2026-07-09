@@ -23,9 +23,12 @@ export function makeBitReader(bytes: Uint8Array): { read(n: number): number } {
 // synthetic annotation. Field layout verified field-by-field against this tool's own
 // synthetic-comment ground truth (every field below matched exactly, incl. seedAccessAddress
 // and an independently-measured PTO) across multiple packets in a real capture — see the
-// git history / session notes for that validation. Stops at SDU_Interval: fields after that
-// (Max_SDU, BaseCRCInit, payload counter, encryption) aren't used by this tool and weren't
-// independently verified, so they're deliberately not decoded rather than guessed.
+// git history / session notes for that validation. Stops decoding individual bit-fields at
+// SDU_Interval: fields after that (Max_SDU, BaseCRCInit, Channel_Map, PHY, payload counter)
+// aren't used by this tool and weren't independently verified, so they're deliberately not
+// decoded rather than guessed. `encrypted` is the one exception — it's derived from the AD
+// structure's overall byte length rather than a bit-field read (see below), so it doesn't need
+// those unverified fields decoded to be trustworthy.
 //
 // Pseudo-header is LINKTYPE_BLUETOOTH_LE_LL_WITH_PHDR (DLT 256): 10 bytes — rf_channel(1),
 // signal_power(1, signed), noise_power(1, signed), aa_offenses(1), ref_access_address(4, LE),
@@ -83,6 +86,14 @@ export function decodeBigInfoFromRawPacket(bytes: Uint8Array): BigInfoDecoded {
   if (!bigInfoBytes) return { ok: false, reason: 'no BIGInfo (AD type 0x2C) found in ACAD' };
   if (bigInfoBytes.length < 20) return { ok: false, reason: 'BIGInfo shorter than expected' };
 
+  // BIGInfo has no explicit "Encrypted" bit — encryption state is signaled purely by the AD
+  // structure's own byte length: 33 octets when the BIG is unencrypted, or 57 when encrypted
+  // (the 24 extra bytes are GIV(8) + GSKD(16), appended after the fields this tool decodes).
+  // Confirmed directly: auracast.pcapng and test-enc.pcapng both come in at 57 bytes, while
+  // auracast2/auracast3/test3 all come in at exactly 33 — a threshold well clear of either value
+  // is used rather than an exact-match check, in case some encoder pads a byte or two.
+  const encrypted = bigInfoBytes.length > 40;
+
   const br = makeBitReader(bigInfoBytes);
   const bigOffset = br.read(14);
   const bigOffsetUnits = br.read(1);
@@ -116,5 +127,6 @@ export function decodeBigInfoFromRawPacket(bytes: Uint8Array): BigInfoDecoded {
     framing,
     seedAccessAddress,
     sduIntervalMs: sduIntervalUs / 1000,
+    encrypted,
   };
 }

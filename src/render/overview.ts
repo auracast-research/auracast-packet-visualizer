@@ -92,6 +92,9 @@ export function renderCaptureSummary(): void {
     `<b>${capture.eventsSorted.length}</b> events captured (#${capture.eventsSorted[0]}–#${capture.eventsSorted[capture.eventsSorted.length - 1]})<br>` +
     `<b>${capture.rows.length}</b> annotated sub-event packets, <b>${capture.rawUncommentedCount}</b> raw/undecoded (periodic advertising)<br>` +
     `Derived packing: <b>${capture.regimeFromRatio}</b><br>` +
+    (capture.config.encrypted
+      ? `BIG is <b>encrypted</b> — control PDU content can't be decoded.<br>`
+      : '') +
     (!capture.ptoConsistent
       ? `<span class="packing-invalid">PTO offset was inconsistent across pre-transmissions — using the most common value.</span>`
       : capture.ptoSource === 'biginfo-fallback'

@@ -72,6 +72,7 @@ export function buildCaptureFromPackets(packets: RawPacket[]): Capture {
     isoIntervalUs: bigInfoRaw.isoIntervalMs! * 1000,
     sduIntervalUs: bigInfoRaw.sduIntervalMs! * 1000,
     maxPdu: bigInfoRaw.maxPdu!,
+    encrypted: bigInfoRaw.encrypted!,
   };
 
   const gc = big.nse / big.bn;
@@ -111,7 +112,9 @@ export function buildCaptureFromPackets(packets: RawPacket[]): Capture {
       firstEventRx: pc.firstEventRx,
       tsUs: p.tsUs,
       pduBytes: Math.max(p.capLen - PDU_OVERHEAD_BYTES, 0),
-      ...(pc.kindSimple === 'control' ? { controlPdu: decodeBigControlPduFromRawPacket(p.bytes) } : {}),
+      ...(pc.kindSimple === 'control'
+        ? { controlPdu: decodeBigControlPduFromRawPacket(p.bytes, big.encrypted) }
+        : {}),
     });
   }
   rows.sort((a, b) => a.tsUs - b.tsUs);
@@ -209,6 +212,7 @@ export function buildCaptureFromPackets(packets: RawPacket[]): Capture {
       sduIntervalMs: big.sduIntervalUs / 1000,
       maxPdu: big.maxPdu,
       numBis: big.numBis,
+      encrypted: big.encrypted,
       // BIGInfo itself doesn't signal which PHY was used, so config.phyMbps is never set here —
       // the caller's existing PHY selection is left alone rather than getting silently blanked.
     },
