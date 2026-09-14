@@ -12,7 +12,7 @@ It operates in two modes:
 - **Simulation:** Allows tweaking BIS properties to see how this affects packet number, layout and timing.
 - **Capture:** Load a sniffed BIS packet capture. This will show the full capture and render the packet layout with some additional information (e.g., missing packets).
 
-The *capture mode* requires a `.pcapng` file with raw LE LL packets. You can use the sniffer in [Auracast Hacker's Toolkit](https://github.com/auracast-research/auracast-hackers-toolkit) to get such a packet capture.
+The *capture mode* requires a `.pcapng` file with raw LE LL packets. You can use the sniffer in [Auracast Hacker's Toolkit](https://github.com/auracast-research/auracast-hackers-toolkit) to get such a packet capture. Press *Configure* to load a PCAP.
 
 ## Build & Run
 
@@ -20,6 +20,6 @@ This builds to a single HTML file that can be opened, or served via the dev serv
 
 ```
 npm install
-npm run dev        # local dev server with hot reload
+npm run dev         # local dev server with hot reload
 npm run build       # writes the single-file dist/index.html
 ```
